@@ -1,0 +1,1133 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#faf9f6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>NEET TRACKER PRO</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        cream: '#faf9f6',
+                        sage: { 50: '#f4f6f0', 100: '#e8ebe0', 400: '#A4B476', 500: '#8A9A5B', 600: '#6B7A46', 900: '#2c331d' },
+                        mutedBlue: { 50: '#eff2f5', 100: '#e0e7ed', 400: '#7B9BBA', 500: '#5B7C99', 600: '#405B75', 900: '#1d2a36' },
+                        lavender: { 50: '#fbfbff', 100: '#f5f5fc', 400: '#EBEBFA', 500: '#E6E6FA', 600: '#C2C2EB', 900: '#3a3a5c' },
+                        darkBg: '#121212',
+                        darkCard: '#1E1E1E',
+                        darkBorder: '#2A2A2A'
+                    },
+                    fontFamily: { sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'] },
+                    boxShadow: { 'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)' }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        body { font-family: 'Inter', sans-serif; overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; padding-bottom: env(safe-area-inset-bottom); }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .transition-theme { transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease; }
+        
+        .custom-checkbox {
+            appearance: none; background-color: transparent; margin: 0; font: inherit; color: currentColor;
+            width: 1.15em; height: 1.15em; border: 2px solid currentColor; border-radius: 0.25em; display: grid; place-content: center; transition: all 0.2s ease-in-out; cursor: pointer;
+        }
+        .custom-checkbox::before {
+            content: ""; width: 0.65em; height: 0.65em; transform: scale(0); transition: 120ms transform ease-in-out;
+            box-shadow: inset 1em 1em white; background-color: transform; transform-origin: center;
+            clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+        }
+        .custom-checkbox:checked { background-color: #8A9A5B; border-color: #8A9A5B; }
+        .custom-checkbox:checked::before { transform: scale(1); }
+        
+        @keyframes subtle-pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        .animate-subtle-pulse { animation: subtle-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    </style>
+</head>
+<body class="bg-cream dark:bg-darkBg text-slate-800 dark:text-slate-200 transition-theme min-h-screen pb-20 select-none">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, createContext, useContext, useRef, useCallback } = React;
+
+        // --- CONSTANTS ---
+        const TARGET_START_DATE = new Date('2026-09-28');
+        const TARGET_END_DATE = new Date('2027-05-03');
+        const SUBJECTS = ['Physics', 'Chemistry', 'Botany', 'Zoology'];
+        
+        const generateId = () => Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+        
+        const formatDate = (dateString) => {
+            if (!dateString) return '';
+            const options = { year: 'numeric', month: 'short', day: 'numeric' };
+            return new Date(dateString).toLocaleDateString(undefined, options);
+        };
+
+        const getTodayString = () => {
+            const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+            return (new Date(Date.now() - tzoffset)).toISOString().split('T')[0];
+        };
+
+        const getDaysRemaining = (endDate) => {
+            const today = new Date(getTodayString() + 'T00:00:00');
+            const end = new Date(endDate + 'T00:00:00');
+            return Math.max(0, Math.ceil((end - today) / 86400000));
+        };
+
+        const getRevisionReminders = (chapters, today) => {
+            const reminders = [];
+            (chapters || []).forEach(chapter => {
+                const dates = chapter.revisionDates || {};
+                [['rev1','1st Revision'],['rev2','2nd Revision'],['rev3','Final Revision']].forEach(([key,label]) => {
+                    const date = dates[key];
+                    if (date && !chapter.progress?.[key]) {
+                        const diff = Math.ceil((new Date(date+'T00:00:00') - new Date(today+'T00:00:00')) / 86400000);
+                        if (diff <= 7) reminders.push({ chapter, key, label, date, diff });
+                    }
+                });
+            });
+            return reminders.sort((a,b) => new Date(a.date)-new Date(b.date));
+        };
+
+        // --- STRICT SYLLABUS DEFINITION (EXACTLY 83 CHAPTERS) ---
+        const generateDefaultChapters = () => {
+            const syllabus = {
+                'Physics': [
+                    'Basic Math', 'Vector', 'Motion in Straight Line', 'Motion in Plane', 'Laws of Motion', 'Work', 'Centre of Mass', 'Rotational Motion', 'Gravitation', 'Mechanical Properties of Solid', 'Thermal Properties of Matter', 'Kinetic Theory', 'Thermodynamics', 'Oscillations', 'Waves', 'Electric Charge & Fields', 'Electric Potential', 'Current Electricity', 'Moving Charge', 'Magnetism & Matter', 'Electromagnetic Induction', 'Alternating Current', 'EM Wave', 'Ray Optics', 'Wave', 'Dual Nature', 'Atom', 'Nuclei', 'Semiconductor'
+                ],
+                'Chemistry': [
+                    'Some Basic Concepts of Chemistry', 'Atomic Structure', 'Chemical Bonding and Molecular Structure', 'Thermodynamics', 'Solutions', 'Equilibrium', 'Redox Reactions', 'Electrochemistry', 'Chemical Kinetics', 'Classification of Elements and Periodicity', 'p-Block Elements', 'd- and f-Block Elements', 'Coordination Compounds', 'Purification & Characterisation of Organic Compounds', 'GOC', 'Hydrocarbons', 'Haloalkane and Haloarene', 'Alcohol, Phenol and Ether', 'Aldehyde, Ketone and Carboxylic', 'Amines', 'Biomolecules'
+                ],
+                'Botany': [
+                    'The Living World', 'Biological Classification', 'Plant Kingdom', 'Morphology of Flowering Plants', 'Anatomy of Flowering Plants', 'Cell Cycle & Cell Division', 'Photosynthesis', 'Respiration in Plants', 'Plant Growth & Development', 'Transport in Plants', 'Mineral Nutrition', 'Sexual Reproduction in Flowering Plants', 'Principles of Inheritance & Variation', 'Molecular Basis of Inheritance', 'Organisms & Populations', 'Ecosystem'
+                ],
+                'Zoology': [
+                    'Animal Kingdom', 'Structural Organisation in Animals', 'Cell: Structure & Function', 'Biomolecules', 'Evolution', 'Human Health & Disease', 'Human Reproduction', 'Reproductive Health', 'Body Fluids & Circulation', 'Breathing & Exchange of Gases', 'Excretory Products', 'Locomotion & Movement', 'Neural Control & Coordination', 'Chemical Coordination & Integration', 'Biotechnology: Principles & Processes', 'Biotechnology: Applications', 'Digestion & Absorption'
+                ]
+            };
+            
+            const chapters = [];
+            for (const [subject, topics] of Object.entries(syllabus)) {
+                topics.forEach((topic) => {
+                    const deterministicId = `def-${subject}-${topic.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`;
+                    chapters.push({
+                        id: deterministicId, name: topic, subject: subject, priority: 'Medium', status: 'Not Started', deadline: '', notes: '',
+                        revisionDates: { rev1: '', rev2: '', rev3: '' },
+                        progress: { lectures: false, notes: false, dpp: false, pyq: false, rev1: false, rev2: false, rev3: false, mistakes: false, test: false, extra: false }
+                    });
+                });
+            }
+            return chapters;
+        };
+
+        const calculateProgress = (progressObj) => {
+            if (!progressObj) return 0;
+            const keys = Object.keys(progressObj).filter(k => k !== 'extra');
+            const total = keys.length;
+            const completed = keys.filter(k => progressObj[k]).length;
+            return total === 0 ? 0 : Math.round((completed / total) * 100);
+        };
+
+        const formatDuration = (minutes) => {
+            const h = Math.floor(minutes / 60);
+            const m = Math.floor(minutes % 60);
+            return h > 0 ? `${h}h ${m}m` : `${m}m`;
+        };
+
+        const parseLocalDate = (x) => { if(!x) return null; const [y,m,d]=String(x).split('-').map(Number); return y&&m&&d?new Date(y,m-1,d):null; };
+        const toDateString = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const addDays = (x,n) => { const d=parseLocalDate(x)||new Date(); d.setDate(d.getDate()+n); return toDateString(d); };
+        const getWeekStart = x => { const d=parseLocalDate(x)||new Date(); d.setDate(d.getDate()-d.getDay()); return toDateString(d); };
+        const getSessionMinutes = (sessions,date) => (sessions||[]).filter(s=>s.date===date).reduce((a,s)=>a+(Number(s.durationMinutes)||0),0);
+        const getSubjectMinutes = (sessions,date) => { const r={}; SUBJECTS.forEach(x=>r[x]=0); (sessions||[]).filter(s=>s.date===date).forEach(s=>{if(r[s.subject]!==undefined)r[s.subject]+=Number(s.durationMinutes)||0;}); return r; };
+        const getDateLabel = (x,o={weekday:'short',month:'short',day:'numeric'}) => { const d=parseLocalDate(x); return d?d.toLocaleDateString(undefined,o):''; };
+
+        // Timer helper: every timer view calculates elapsed time from the same
+        // persisted timestamps. This prevents the floating bar and main timer
+        // from drifting apart (e.g. 29:56 vs 89:56).
+        const getLiveElapsedMs = (timer) => {
+            if (!timer) return 0;
+            const accumulated = Number(timer.accumulatedMs) || 0;
+            if (timer.isPaused || !timer.lastResumeTime) return accumulated;
+            return accumulated + Math.max(0, Date.now() - Number(timer.lastResumeTime));
+        };
+
+        // --- CONTEXT & PROVIDER ---
+        const AppContext = createContext();
+
+        const defaultSettings = {
+            theme: 'light', dailyTargetHours: 8, weeklyTargetHours: 50, pomodoroDuration: 25, minStudyThreshold: 1
+        };
+
+        const initialAppState = {
+            settings: defaultSettings, chapters: [], sessions: [], tasks: [], tests: [], mistakes: [], weeklyPlans: [], activeTimer: null 
+        };
+
+        // iPad/Safari-safe storage: local HTML files can block localStorage.
+        const getDeviceStorageKey = () => {
+            try {
+                const storage = window.localStorage;
+                let id = storage.getItem('neetTrackerProDeviceId');
+                if (!id) {
+                    id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : generateId();
+                    storage.setItem('neetTrackerProDeviceId', id);
+                }
+                return 'neetTrackerProData_' + id;
+            } catch (e) {
+                return 'neetTrackerProSession_' + generateId();
+            }
+        };
+        const DEVICE_STORAGE_KEY = getDeviceStorageKey();
+        const safeStorage = {
+            get(key) { try { return window.localStorage ? window.localStorage.getItem(key) : null; } catch (e) { return null; } },
+            set(key, value) { try { if (window.localStorage) window.localStorage.setItem(key, value); } catch (e) {} },
+            remove(key) { try { if (window.localStorage) window.localStorage.removeItem(key); } catch (e) {} }
+        };
+
+        const AppProvider = ({ children }) => {
+            const [data, setData] = useState(() => {
+                try {
+                    const localData = safeStorage.get(DEVICE_STORAGE_KEY) || safeStorage.get('neetTrackerProData');
+                    const parsed = localData ? JSON.parse(localData) : initialAppState;
+                    
+                    const latestSyllabus = generateDefaultChapters();
+                    const existingChaptersMap = new Map((parsed.chapters || []).map(c => [`${c.subject}-${c.name}`, c]));
+                    
+                    let mergedChapters = latestSyllabus.map(newChap => {
+                        const oldChap = existingChaptersMap.get(`${newChap.subject}-${newChap.name}`);
+                        if (oldChap) return { ...newChap, ...oldChap, id: oldChap.id };
+                        return newChap;
+                    });
+
+                    parsed.chapters = mergedChapters;
+                    if(!parsed.weeklyPlans) parsed.weeklyPlans = []; 
+                    if(!parsed.tests) parsed.tests = []; 
+                    if(!parsed.mistakes) parsed.mistakes = [];
+                    if(!parsed.tasks) parsed.tasks = []; 
+                    return { ...initialAppState, ...parsed };
+                } catch (e) {
+                    console.error("Failed to load data", e);
+                    return { ...initialAppState, chapters: generateDefaultChapters() };
+                }
+            });
+
+            useEffect(() => {
+                safeStorage.set(DEVICE_STORAGE_KEY, JSON.stringify(data));
+                document.documentElement.classList.toggle('dark', data.settings.theme === 'dark');
+            }, [data]);
+
+            // CRUD Operations
+            const updateSettings = (newSettings) => setData(prev => ({ ...prev, settings: { ...prev.settings, ...newSettings } }));
+            const updateChapter = (id, updates) => setData(prev => ({ ...prev, chapters: prev.chapters.map(c => c.id === id ? { ...c, ...updates } : c) }));
+            const addSession = (session) => setData(prev => ({ ...prev, sessions: [...prev.sessions, { ...session, id: generateId() }] }));
+            
+            // Manual Tasks
+            const addTask = (task) => setData(prev => ({ ...prev, tasks: [...prev.tasks, { ...task, id: generateId() }] }));
+            const updateTask = (id, updates) => setData(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === id ? { ...t, ...updates } : t) }));
+            const deleteTask = (id) => setData(prev => ({ ...prev, tasks: prev.tasks.filter(t => t.id !== id) }));
+            
+            const addTest = (test) => setData(prev => ({ ...prev, tests: [...prev.tests, { ...test, id: generateId(), createdAt: new Date().toISOString() }] }));
+            const updateTest = (id, updates) => setData(prev => ({ ...prev, tests: prev.tests.map(t => t.id === id ? { ...t, ...updates } : t) }));
+            const deleteTest = (id) => setData(prev => ({ ...prev, tests: prev.tests.filter(t => t.id !== id) }));
+            const addMistake = (mistake) => setData(prev => ({ ...prev, mistakes: [...prev.mistakes, { ...mistake, id: generateId(), createdAt: new Date().toISOString() }] }));
+            const updateMistake = (id, updates) => setData(prev => ({ ...prev, mistakes: prev.mistakes.map(m => m.id === id ? { ...m, ...updates } : m) }));
+            const deleteMistake = (id) => setData(prev => ({ ...prev, mistakes: prev.mistakes.filter(m => m.id !== id) }));
+            const setActiveTimerState = (timerState) => setData(prev => ({ ...prev, activeTimer: timerState }));
+            
+            // Smart Planner CRUD
+            const addWeeklyPlan = (plan) => setData(prev => ({ ...prev, weeklyPlans: [...prev.weeklyPlans, { ...plan, id: generateId() }] }));
+            const updateWeeklyPlanTask = (planId, taskId, updates) => setData(prev => ({
+                ...prev, weeklyPlans: prev.weeklyPlans.map(p => p.id === planId ? { ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, ...updates } : t) } : p)
+            }));
+            const deleteWeeklyPlan = (id) => setData(prev => ({ ...prev, weeklyPlans: prev.weeklyPlans.filter(p => p.id !== id) }));
+
+            const exportData = () => {
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `NEET_Tracker_Backup_${getTodayString()}.json`;
+                a.click();
+            };
+
+            const importData = (jsonData) => {
+                try {
+                    const parsed = JSON.parse(jsonData);
+                    if (parsed && parsed.settings && parsed.chapters) {
+                        if (confirm("WARNING: Importing this backup will replace your current data. Do you want to proceed?")) {
+                            setData(parsed);
+                            alert("Data restored successfully!");
+                        }
+                    } else {
+                        alert("Invalid backup file format. Missing essential data.");
+                    }
+                } catch (e) { alert("Error parsing backup file. Make sure it is a valid JSON."); }
+            };
+
+            const resetData = () => {
+                if (confirm("WARNING: This will delete ALL your data permanently. Are you sure?")) {
+                    setData({ ...initialAppState, chapters: generateDefaultChapters() });
+                    safeStorage.remove(DEVICE_STORAGE_KEY);
+                }
+            };
+
+            return (
+                <AppContext.Provider value={{
+                    ...data, updateSettings, updateChapter, addSession, addTask, updateTask, deleteTask,
+                    addTest, updateTest, deleteTest, addMistake, updateMistake, deleteMistake,
+                    setActiveTimerState, exportData, importData, resetData, addWeeklyPlan, updateWeeklyPlanTask, deleteWeeklyPlan
+                }}>
+                    {children}
+                </AppContext.Provider>
+            );
+        };
+
+        // --- SHARED UI COMPONENTS ---
+        const Card = ({ children, className = "", onClick }) => (
+            <div onClick={onClick} className={`bg-white dark:bg-darkCard rounded-2xl shadow-soft dark:shadow-none dark:border dark:border-darkBorder p-4 ${onClick ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800' : ''} ${className}`}>
+                {children}
+            </div>
+        );
+
+        const Button = ({ children, onClick, variant = 'primary', className = "", type = "button" }) => {
+            const variants = {
+                primary: "bg-sage-500 hover:bg-sage-600 text-white shadow-sm",
+                secondary: "bg-mutedBlue-500 hover:bg-mutedBlue-600 text-white shadow-sm",
+                outline: "border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200",
+                danger: "bg-red-500 hover:bg-red-600 text-white",
+                ghost: "hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
+            };
+            return <button type={type} onClick={onClick} className={`px-4 py-2.5 rounded-xl font-medium transition-colors flex items-center justify-center gap-2 ${variants[variant]} ${className}`}>{children}</button>;
+        };
+
+        const Input = ({ label, type = "text", value, onChange, placeholder, required = false, className="" }) => (
+            <div className={`flex flex-col gap-1.5 ${className}`}>
+                {label && <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</label>}
+                <input type={type} value={value} onChange={onChange} placeholder={placeholder} required={required} className="bg-slate-50 dark:bg-darkBg border border-slate-200 dark:border-darkBorder rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sage-400 dark:text-white transition-all w-full" />
+            </div>
+        );
+
+        const Select = ({ label, value, onChange, options, className="" }) => (
+            <div className={`flex flex-col gap-1.5 ${className}`}>
+                {label && <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</label>}
+                <div className="relative">
+                    <select value={value} onChange={onChange} className="bg-slate-50 dark:bg-darkBg border border-slate-200 dark:border-darkBorder rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sage-400 dark:text-white transition-all appearance-none w-full">
+                        {options.map((opt, i) => <option key={i} value={opt.value !== undefined ? opt.value : opt}>{opt.label || opt}</option>)}
+                    </select>
+                    <i className="ph-fill ph-caret-down absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"></i>
+                </div>
+            </div>
+        );
+
+        const ProgressBar = ({ progress, colorClass = "bg-sage-500", heightClass = "h-2", className="" }) => (
+            <div className={`w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden ${heightClass} ${className}`}>
+                <div className={`${heightClass} rounded-full transition-all duration-500 ${colorClass}`} style={{ width: `${Math.max(0, Math.min(100, progress))}%` }}></div>
+            </div>
+        );
+
+        const Modal = ({ isOpen, onClose, title, children }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white dark:bg-darkCard rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl relative flex flex-col hide-scrollbar">
+                        <div className="sticky top-0 bg-white/90 dark:bg-darkCard/90 backdrop-blur-md p-4 border-b border-slate-100 dark:border-darkBorder flex justify-between items-center z-10">
+                            <h2 className="text-lg font-bold">{title}</h2>
+                            <button onClick={onClose} className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-700"><i className="ph ph-x"></i></button>
+                        </div>
+                        <div className="p-4 flex-1">{children}</div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- GLOBAL FLOATING TIMER ---
+        const GlobalTimerBar = ({ onNavigate }) => {
+            const { activeTimer, setActiveTimerState, addSession, updateWeeklyPlanTask, updateTask } = useContext(AppContext);
+            const [, setTimerTick] = useState(0);
+
+            // Re-render frequently, but calculate elapsed time from the persisted
+            // timestamp so every timer surface shows the exact same value.
+            useEffect(() => {
+                if (!activeTimer?.isActive || activeTimer?.isPaused) return undefined;
+                const interval = setInterval(() => setTimerTick(v => v + 1), 250);
+                return () => clearInterval(interval);
+            }, [activeTimer?.isActive, activeTimer?.isPaused]);
+
+            useEffect(() => {
+                if (!activeTimer?.isActive || activeTimer?.isPaused || activeTimer.mode === 'Normal Timer') return undefined;
+                const currentMs = getLiveElapsedMs(activeTimer);
+                if (activeTimer.initialDurationMs > 0 && currentMs >= activeTimer.initialDurationMs) {
+                    const durationMins = Math.round(activeTimer.initialDurationMs / 60000);
+                    addSession({
+                        date: getTodayString(), startTime: new Date(activeTimer.startTime).toISOString(), endTime: new Date().toISOString(),
+                        durationMinutes: durationMins, subject: activeTimer.subject, chapterId: activeTimer.chapterId, type: activeTimer.studyType, mode: activeTimer.mode
+                    });
+                    if (activeTimer.planId && activeTimer.taskId) {
+                        updateWeeklyPlanTask(activeTimer.planId, activeTimer.taskId, { completed: true, status: 'complete', actualMinutes: durationMins });
+                    } else if (activeTimer.taskId) {
+                        updateTask(activeTimer.taskId, { completed: true, status: 'complete' });
+                    }
+                    setActiveTimerState(null);
+                    if(window.navigator.vibrate) window.navigator.vibrate([200, 100, 200]);
+                }
+            }, [activeTimer, addSession, updateWeeklyPlanTask, updateTask, setActiveTimerState]);
+
+            if (!activeTimer || !activeTimer.isActive) return null;
+
+            const elapsedMs = getLiveElapsedMs(activeTimer);
+            let displayMs = elapsedMs;
+            if (activeTimer.mode !== 'Normal Timer' && activeTimer.initialDurationMs > 0) {
+                displayMs = Math.max(0, activeTimer.initialDurationMs - elapsedMs);
+            }
+            const totalSeconds = Math.floor(displayMs / 1000);
+            const m = Math.floor(totalSeconds / 60);
+            const s = totalSeconds % 60;
+            const h = Math.floor(totalSeconds / 3600);
+            const timeStr = h > 0
+                ? `${h}:${(m%60).toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+                : `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+
+            return (
+                <div className="fixed bottom-[72px] left-2 right-2 max-w-[420px] mx-auto z-40">
+                    <div onClick={() => onNavigate('study')} className="bg-sage-600 dark:bg-sage-700 text-white rounded-xl shadow-lg p-3 flex items-center justify-between cursor-pointer">
+                        <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center animate-subtle-pulse"><i className="ph-fill ph-timer text-lg"></i></div>
+                            <div>
+                                <p className="text-xs font-semibold opacity-80 uppercase tracking-wider">{activeTimer.subject} • {activeTimer.mode === 'Normal Timer' ? 'Normal Timer' : activeTimer.mode}</p>
+                                <p className="font-bold font-mono text-lg leading-tight">{timeStr}</p>
+                            </div>
+                        </div>
+                        <i className="ph ph-caret-right text-white/50"></i>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- 1. DASHBOARD VIEW (With Manual Tasks + Smart Planner Tasks Combined) ---
+        const DashboardView = ({ onNavigate, onNavigateToTask }) => {
+            const { sessions, tasks, settings, chapters, weeklyPlans, addTask, updateTask, deleteTask, updateWeeklyPlanTask } = useContext(AppContext);
+            const today = getTodayString();
+            const [showTaskModal, setShowTaskModal] = useState(false);
+            const [newTask, setNewTask] = useState({ name: '', subject: SUBJECTS[0], chapterId: '', estMinutes: 60 });
+
+            const filteredChapters = chapters.filter(c => c.subject === newTask.subject);
+
+            const handleAddManualTask = (e) => {
+                e.preventDefault();
+                addTask({ ...newTask, date: today, completed: false, status: 'pending', type: 'Lecture' });
+                setShowTaskModal(false);
+                setNewTask({ name: '', subject: SUBJECTS[0], chapterId: '', estMinutes: 60 });
+            };
+
+            const stats = useMemo(() => {
+                const todaySessions = sessions.filter(s => s.date === today);
+                const todayMinutes = todaySessions.reduce((acc, curr) => acc + curr.durationMinutes, 0);
+                const todayHours = (todayMinutes / 60).toFixed(1);
+                
+                let currentStreak = 0;
+                let checkDate = new Date();
+                while (true) {
+                    const dateStr = checkDate.toISOString().split('T')[0];
+                    const dayMins = sessions.filter(s => s.date === dateStr).reduce((a, c) => a + c.durationMinutes, 0);
+                    if (dayMins / 60 >= settings.minStudyThreshold) { currentStreak++; checkDate.setDate(checkDate.getDate() - 1); }
+                    else if (dateStr === today) { checkDate.setDate(checkDate.getDate() - 1); continue; }
+                    else break;
+                }
+
+                const totalChapters = chapters.length;
+                const completedChapters = chapters.filter(c => calculateProgress(c.progress) === 100).length;
+                const syllabusProgress = totalChapters ? Math.round((completedChapters / totalChapters) * 100) : 0;
+
+                return { todayHours, todayMinutes, targetPercent: Math.min(100, Math.round((todayMinutes / 60) / settings.dailyTargetHours * 100)), currentStreak, syllabusProgress };
+            }, [sessions, settings, chapters, today]);
+
+            const daysRemaining = getDaysRemaining('2027-05-03');
+            const revisionReminders = useMemo(() => getRevisionReminders(chapters, today), [chapters, today]);
+
+            // Combine Manual Tasks + Smart Planner Tasks for "Today's Plan"
+            const todayCombinedTasks = useMemo(() => {
+                let combined = [];
+                
+                // 1. Add Smart Planner Tasks (due today or carry-forward)
+                let totalPlanEst = 0;
+                let totalPlanComp = 0;
+                weeklyPlans.forEach(plan => {
+                    plan.tasks.forEach(t => {
+                        totalPlanEst += t.estMinutes;
+                        if(t.completed) totalPlanComp += t.estMinutes;
+                        if ((t.date === today) || (t.date < today && !t.completed)) {
+                            combined.push({...t, isSmart: true, planId: plan.id, subject: plan.subject, chapterId: plan.chapterId});
+                        }
+                    });
+                });
+                
+                // 2. Add Manual Tasks (due today)
+                tasks.filter(t => t.date === today).forEach(t => {
+                    combined.push({...t, isSmart: false});
+                });
+                
+                // Sort by incomplete first, then time
+                combined.sort((a, b) => (a.completed === b.completed) ? 0 : a.completed ? 1 : -1);
+
+                const planProgress = totalPlanEst > 0 ? Math.round((totalPlanComp/totalPlanEst)*100) : 0;
+                return { tasks: combined, planProgress };
+            }, [weeklyPlans, tasks, today]);
+
+            return (
+                <div className="p-4 space-y-5 pb-24 h-full overflow-y-auto hide-scrollbar">
+                    {/* MOTIVATIONAL GREETING */}
+                    <div className="pt-2 text-center sm:text-left">
+                        <h1 className="text-2xl font-black text-sage-600 dark:text-sage-400 tracking-tight mb-0.5">Hello Future Doctors</h1>
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-widest">{formatDate(today)}</p>
+                    </div>
+
+                    <div className="flex justify-between items-end">
+                        <h2 className="text-xl font-bold leading-none tracking-tight">Dashboard</h2>
+                        <div className="flex items-center gap-1.5 bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 px-3 py-1.5 rounded-full">
+                            <i className="ph-fill ph-fire text-lg"></i>
+                            <span className="text-sm font-bold">{stats.currentStreak} Day Streak</span>
+                        </div>
+                    </div>
+
+                    {/* MAIN STUDY CARD */}
+                    <Card className="bg-gradient-to-br from-sage-500 to-sage-600 text-white shadow-lg border-0 p-5">
+                        <div className="flex justify-between items-start mb-4">
+                            <div>
+                                <p className="text-sage-100 text-xs font-medium uppercase tracking-wider mb-1">Today's Study</p>
+                                <div className="flex items-baseline gap-1">
+                                    <h2 className="text-4xl font-black tabular-nums">{stats.todayHours}</h2>
+                                    <span className="text-lg font-medium opacity-80">/ {settings.dailyTargetHours}h</span>
+                                </div>
+                            </div>
+                            <button onClick={() => onNavigate('study')} className="w-10 h-10 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center transition-colors">
+                                <i className="ph-fill ph-play text-xl"></i>
+                            </button>
+                        </div>
+                        <ProgressBar progress={stats.targetPercent} colorClass="bg-white" heightClass="h-1.5" className="bg-sage-700" />
+                        <div className="mt-2 text-right text-xs font-medium text-sage-100">{stats.targetPercent}% of daily goal</div>
+                    </Card>
+
+                    {/* NEET COUNTDOWN + REVISION REMINDERS */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <Card className="p-4 bg-white dark:bg-darkCard border border-sage-100 dark:border-darkBorder">
+                            <div className="flex items-center gap-2 mb-2 text-sage-600"><i className="ph-fill ph-hourglass-medium"></i><span className="text-[10px] font-black uppercase tracking-wider">NEET Countdown</span></div>
+                            <div className="text-3xl font-black tabular-nums">{daysRemaining}</div>
+                            <p className="text-[10px] text-slate-500 mt-1">days left • 3 May 2027</p>
+                        </Card>
+                        <Card className="p-4 bg-white dark:bg-darkCard border border-amber-100 dark:border-darkBorder">
+                            <div className="flex items-center gap-2 mb-2 text-amber-600"><i className="ph-fill ph-bell"></i><span className="text-[10px] font-black uppercase tracking-wider">Revision Reminder</span></div>
+                            <div className="text-3xl font-black tabular-nums">{revisionReminders.length}</div>
+                            <p className="text-[10px] text-slate-500 mt-1">due within 7 days</p>
+                        </Card>
+                    </div>
+                    {revisionReminders.length > 0 && (
+                        <Card className="p-4 border-l-4 border-l-amber-400">
+                            <div className="flex items-center justify-between mb-3">
+                                <h3 className="font-bold text-sm">Upcoming Revisions</h3>
+                                <span className="text-[10px] font-bold text-amber-600">NEXT 7 DAYS</span>
+                            </div>
+                            <div className="space-y-2">
+                                {revisionReminders.slice(0,5).map((r,i) => {
+                                    const overdue = r.diff < 0;
+                                    const todayDue = r.diff === 0;
+                                    return <div key={r.chapter.id+r.key+i} className="flex items-center justify-between gap-3 text-xs">
+                                        <div className="min-w-0"><p className="font-semibold truncate">{r.chapter.name}</p><p className="text-[10px] text-slate-400">{r.chapter.subject} • {r.label}</p></div>
+                                        <span className={`shrink-0 font-bold ${overdue ? 'text-red-500' : todayDue ? 'text-amber-600' : 'text-sage-600'}`}>{overdue ? 'OVERDUE' : todayDue ? 'TODAY' : `${r.diff}d`}</span>
+                                    </div>;
+                                })}
+                            </div>
+                        </Card>
+                    )}
+
+                    {/* TODAY'S TARGETS (COMBINED MANUAL & SMART) */}
+                    <div className="pt-2">
+                        <div className="flex justify-between items-center mb-3 px-1">
+                            <div>
+                                <h3 className="font-bold text-sm text-slate-700 dark:text-slate-300 uppercase tracking-wider">Today's Targets</h3>
+                                {todayCombinedTasks.planProgress > 0 && <span className="text-[10px] font-bold text-sage-500">{todayCombinedTasks.planProgress}% Smart Plan Complete</span>}
+                            </div>
+                            <button onClick={() => setShowTaskModal(true)} className="text-sage-600 font-bold text-sm bg-sage-50 dark:bg-sage-900/20 px-3 py-1.5 rounded-lg flex items-center gap-1"><i className="ph-bold ph-plus"></i> Add Task</button>
+                        </div>
+                        
+                        {todayCombinedTasks.tasks.length > 0 ? (
+                            <div className="space-y-2">
+                                {todayCombinedTasks.tasks.map(t => {
+                                    const isCarryForward = !t.completed && t.date < today;
+                                    return (
+                                    <Card key={t.id} className={`p-3 flex items-center gap-3 border-l-4 ${t.isSmart ? 'border-l-sage-500' : 'border-l-mutedBlue-500'} ${isCarryForward ? 'bg-orange-50 dark:bg-orange-900/10' : ''}`}>
+                                        <div className="flex flex-col gap-1 shrink-0">
+                                            <button onClick={() => { const updates = { completed: true, status: 'complete' }; t.isSmart ? updateWeeklyPlanTask(t.planId, t.id, updates) : updateTask(t.id, updates); }} className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${t.status === 'complete' || t.completed ? 'bg-sage-100 text-sage-700' : 'bg-slate-100 text-slate-500'}`} title="Complete"><i className="ph-bold ph-check"></i></button>
+                                            <button onClick={() => { const updates = { completed: false, status: 'half' }; t.isSmart ? updateWeeklyPlanTask(t.planId, t.id, updates) : updateTask(t.id, updates); }} className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${t.status === 'half' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`} title="Half Complete"><i className="ph-bold ph-minus"></i></button>
+                                            <button onClick={() => { const updates = { completed: false, status: 'skipped' }; t.isSmart ? updateWeeklyPlanTask(t.planId, t.id, updates) : updateTask(t.id, updates); }} className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${t.status === 'skipped' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'}`} title="Skip"><i className="ph-bold ph-x"></i></button>
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate flex gap-2">
+                                                {t.subject} {isCarryForward && <span className="text-orange-500">CARRY FORWARD</span>} {t.isSmart && <span className="text-sage-500"><i className="ph-fill ph-calendar-check"></i> SMART</span>}
+                                                {t.status === 'complete' || t.completed ? <span className="text-sage-600">COMPLETE</span> : t.status === 'half' ? <span className="text-amber-600">HALF</span> : t.status === 'skipped' ? <span className="text-red-500">SKIPPED</span> : null}
+                                            </p>
+                                            <h4 className={`text-sm font-bold truncate ${t.status === 'complete' || t.completed ? 'line-through text-slate-400' : ''}`}>{t.name}</h4>
+                                            <p className="text-[10px] text-slate-500 mt-0.5">{t.estMinutes} min {t.chapterId ? `• ${chapters.find(c=>c.id===t.chapterId)?.name || ''}` : ''}</p>
+                                        </div>
+                                        <div className="flex items-center gap-1 shrink-0">
+                                            {!t.completed && (
+                                                <button onClick={() => onNavigateToTask(t)} className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center">
+                                                    <i className="ph-fill ph-play"></i>
+                                                </button>
+                                            )}
+                                            {!t.isSmart && (
+                                                <button onClick={() => deleteTask(t.id)} className="w-8 h-8 rounded-full hover:bg-red-50 text-red-400 flex items-center justify-center">
+                                                    <i className="ph ph-trash"></i>
+                                                </button>
+                                            )}
+                                        </div>
+                                    </Card>
+                                )})}
+                            </div>
+                        ) : (
+                            <Card className="p-6 text-center bg-slate-50 dark:bg-darkBg border border-dashed border-slate-200">
+                                <i className="ph ph-check-circle text-3xl text-sage-400 mb-2"></i>
+                                <p className="text-sm font-medium text-slate-500">All caught up! Add a target or start studying.</p>
+                            </Card>
+                        )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <Card className="p-4" onClick={() => onNavigate('planner')}>
+                            <div className="flex items-center gap-2 text-slate-500 mb-2"><i className="ph-fill ph-book-open"></i><span className="text-xs font-semibold uppercase tracking-wider">Syllabus</span></div>
+                            <div className="text-2xl font-bold">{stats.syllabusProgress}%</div>
+                            <ProgressBar progress={stats.syllabusProgress} className="mt-2" heightClass="h-1" />
+                        </Card>
+                        <Card className="p-4" onClick={() => onNavigate('more')}>
+                            <div className="flex items-center gap-2 text-slate-500 mb-2"><i className="ph-fill ph-chart-bar"></i><span className="text-xs font-semibold uppercase tracking-wider">Analytics</span></div>
+                            <div className="text-sm font-medium mt-1 text-slate-600 dark:text-slate-300">View Detailed<br/>Reports</div>
+                        </Card>
+                    </div>
+                    
+                    <div className="mt-8 text-center pb-4 opacity-50">
+                        <p className="text-[10px] font-bold tracking-widest uppercase">CREATED BY SF</p>
+                    </div>
+
+                    <Modal isOpen={showTaskModal} onClose={() => setShowTaskModal(false)} title="Add Daily Target">
+                        <form onSubmit={handleAddManualTask} className="space-y-4 pb-4">
+                            <Input label="Task Name" value={newTask.name} onChange={e=>setNewTask({...newTask, name: e.target.value})} placeholder="e.g. Read NCERT, Complete DPP" required />
+                            <Select label="Subject" value={newTask.subject} onChange={e=>setNewTask({...newTask, subject: e.target.value, chapterId: ''})} options={SUBJECTS} />
+                            <Select label="Chapter (Optional)" value={newTask.chapterId} onChange={e=>setNewTask({...newTask, chapterId: e.target.value})} options={[{label:'General / None', value:''}, ...filteredChapters.map(c=>({label:c.name, value:c.id}))]} />
+                            <Input label="Estimated Minutes" type="number" value={newTask.estMinutes} onChange={e=>setNewTask({...newTask, estMinutes: parseInt(e.target.value)})} required />
+                            <Button type="submit" className="w-full mt-2">Add Target</Button>
+                        </form>
+                    </Modal>
+                </div>
+            );
+        };
+
+        // --- 2. PLANNER / CHAPTER TRACKER VIEW (Strict Syllabus) ---
+        const PlannerView = () => {
+            const { chapters, updateChapter } = useContext(AppContext);
+            const [activeSubject, setActiveSubject] = useState(SUBJECTS[0]);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [selectedChapter, setSelectedChapter] = useState(null);
+
+            const filteredChapters = useMemo(() => {
+                return chapters.filter(c => c.subject === activeSubject && c.name.toLowerCase().includes(searchTerm.toLowerCase()));
+            }, [chapters, activeSubject, searchTerm]);
+
+            const subjectProgress = useMemo(() => {
+                const subChaps = chapters.filter(c => c.subject === activeSubject);
+                if (!subChaps.length) return 0;
+                const completed = subChaps.filter(c => calculateProgress(c.progress) === 100).length;
+                return Math.round((completed / subChaps.length) * 100);
+            }, [chapters, activeSubject]);
+
+            const handleToggleTask = (chapterId, key) => {
+                const chapter = chapters.find(c => c.id === chapterId);
+                const newProgress = { ...chapter.progress, [key]: !chapter.progress[key] };
+                const prog = calculateProgress(newProgress);
+                const newStatus = prog === 100 ? 'Completed' : prog > 0 ? 'In Progress' : 'Not Started';
+                updateChapter(chapterId, { progress: newProgress, status: newStatus });
+                if (selectedChapter?.id === chapterId) setSelectedChapter({ ...chapter, progress: newProgress, status: newStatus });
+            };
+
+            return (
+                <div className="flex flex-col h-full bg-slate-50 dark:bg-darkBg pb-20">
+                    <div className="bg-white dark:bg-darkCard shadow-sm z-10 pt-4 pb-3 px-4">
+                        <h2 className="text-2xl font-bold tracking-tight mb-4">Chapter Tracker</h2>
+                        <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl mb-4 overflow-x-auto hide-scrollbar">
+                            {SUBJECTS.map(sub => (
+                                <button key={sub} onClick={() => setActiveSubject(sub)} className={`flex-1 min-w-[70px] py-1.5 px-2 text-xs font-bold rounded-lg transition-all whitespace-nowrap ${activeSubject === sub ? 'bg-white dark:bg-darkCard shadow-sm' : 'text-slate-500'}`}>
+                                    {sub}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className="flex-1"><p className="text-[10px] font-bold text-slate-400 uppercase">{activeSubject} Progress</p><ProgressBar progress={subjectProgress} className="mt-1" heightClass="h-1.5" /></div>
+                            <span className="text-sm font-bold">{subjectProgress}%</span>
+                        </div>
+                        <div className="relative">
+                            <i className="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                            <input type="text" placeholder="Search chapters..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-darkBorder rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none" />
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar">
+                        {filteredChapters.map((chapter, idx) => {
+                            const prog = calculateProgress(chapter.progress);
+                            const isDone = prog === 100;
+                            return (
+                                <Card key={chapter.id} onClick={() => setSelectedChapter(chapter)} className={`transition-all active:scale-[0.98] ${isDone ? 'opacity-70 border-l-4 border-l-sage-400' : ''}`}>
+                                    <div className="flex gap-3 items-center">
+                                        <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold text-xs text-slate-400 shrink-0">{idx + 1}</div>
+                                        <div className="flex-1 min-w-0">
+                                            <h3 className={`font-semibold text-sm truncate ${isDone ? 'line-through text-slate-500' : ''}`}>{chapter.name}</h3>
+                                            <ProgressBar progress={prog} className="mt-2 w-3/4" heightClass="h-1" colorClass={isDone ? 'bg-sage-400' : 'bg-mutedBlue-500'} />
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                            <span className="text-xs font-bold text-slate-400">{prog}%</span>
+                                        </div>
+                                    </div>
+                                </Card>
+                            )
+                        })}
+                    </div>
+
+                    {selectedChapter && (
+                        <Modal isOpen={!!selectedChapter} onClose={() => setSelectedChapter(null)} title="Chapter Progress">
+                            <div className="space-y-6 pb-4">
+                                <div>
+                                    <h3 className="font-bold text-lg leading-tight mb-1">{selectedChapter.name}</h3>
+                                    <span className="text-[10px] uppercase font-bold text-sage-500 tracking-wider">{calculateProgress(selectedChapter.progress)}% Completed</span>
+                                </div>
+                                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-darkBorder">
+                                    <div className="flex items-center gap-2 mb-3 text-amber-700 dark:text-amber-400"><i className="ph-fill ph-bell"></i><span className="text-xs font-black uppercase tracking-wider">Revision Reminder Dates</span></div>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        {[['rev1','1st Revision'],['rev2','2nd Revision'],['rev3','Final Revision']].map(([key,label]) => <label key={key} className="text-[10px] font-bold text-slate-500">{label}<input type="date" value={selectedChapter.revisionDates?.[key] || ''} onChange={e => { const updated = {...selectedChapter, revisionDates:{...(selectedChapter.revisionDates||{}), [key]:e.target.value}}; setSelectedChapter(updated); updateChapter(selectedChapter.id,{revisionDates:updated.revisionDates}); }} className="mt-1 w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-darkBorder rounded-lg px-2 py-2 text-xs font-medium" /></label>)}
+                                    </div>
+                                    <p className="text-[9px] text-slate-400 mt-2">Dashboard will show unfinished revisions due today or within 7 days.</p>
+                                </div>
+                                <div className="space-y-4">
+                                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-darkBorder pb-1">Core Learning</h4>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {[ {key:'lectures', label:'Lectures'}, {key:'notes', label:'Notes'}, {key:'dpp', label:'DPP'}, {key:'pyq', label:'PYQs'} ].map(item => (
+                                            <label key={item.key} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-darkBorder bg-slate-50 dark:bg-slate-800/50 cursor-pointer">
+                                                <input type="checkbox" checked={selectedChapter.progress[item.key]} onChange={() => handleToggleTask(selectedChapter.id, item.key)} className="custom-checkbox" />
+                                                <span className="text-sm font-medium">{item.label}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-darkBorder pb-1 pt-2">Revisions & Testing</h4>
+                                    <div className="grid grid-cols-1 gap-3">
+                                        {[ {key:'rev1', label:'1st Revision'}, {key:'rev2', label:'2nd Revision'}, {key:'rev3', label:'Final Revision'}, {key:'mistakes', label:'Mistake Book Log'}, {key:'test', label:'Chapter Test'} ].map(item => (
+                                            <label key={item.key} className="flex items-center gap-3 p-3 rounded-xl border border-slate-100 dark:border-darkBorder bg-slate-50 dark:bg-slate-800/50 cursor-pointer">
+                                                <input type="checkbox" checked={selectedChapter.progress[item.key]} onChange={() => handleToggleTask(selectedChapter.id, item.key)} className="custom-checkbox" />
+                                                <span className="text-sm font-medium">{item.label}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                        </Modal>
+                    )}
+                </div>
+            );
+        };
+
+        // --- 3. STUDY TIMER VIEW (TIMER-ONLY MODIFICATION) ---
+        const StudyView = ({ initialTask = null }) => {
+            const { activeTimer, setActiveTimerState, chapters, settings, addSession, updateWeeklyPlanTask, updateTask } = useContext(AppContext);
+
+            // If initialized from a task, keep the task's existing Custom/Pomodoro behavior.
+            const initMode = initialTask ? (initialTask.estMinutes ? 'Custom' : 'Pomodoro') : 'Custom';
+
+            const [mode, setMode] = useState(initMode);
+            const [subject, setSubject] = useState(initialTask?.subject || SUBJECTS[0]);
+            const [chapterId, setChapterId] = useState(initialTask?.chapterId || '');
+            const [studyType, setStudyType] = useState(initialTask?.type || 'Lecture');
+            const [customMins, setCustomMins] = useState(Math.min(240, Math.max(1, initialTask?.estMinutes || 60)));
+            const [, setTimerTick] = useState(0);
+            const studyTypes = ['Lecture', 'Revision', 'DPP', 'PYQ', 'Questions', 'Notes', 'Test', 'Mistake Review', 'Other'];
+            const filteredChapters = chapters.filter(c => c.subject === subject);
+
+            // Both the main timer and floating timer use getLiveElapsedMs(), so a
+            // 180-minute Custom timer can never show two different countdowns.
+            useEffect(() => {
+                if (!activeTimer?.isActive || activeTimer?.isPaused) return undefined;
+                const interval = setInterval(() => setTimerTick(v => v + 1), 250);
+                return () => clearInterval(interval);
+            }, [activeTimer?.isActive, activeTimer?.isPaused]);
+
+            const handleStart = () => {
+                let durMs = 0;
+                if (mode === 'Pomodoro') durMs = Number(settings.pomodoroDuration || 25) * 60000;
+                if (mode === 'Custom') durMs = Math.min(240, Math.max(1, parseInt(customMins, 10) || 60)) * 60000;
+                // Normal Timer intentionally has no end time: it runs until paused/stopped.
+
+                const now = Date.now();
+                setActiveTimerState({
+                    isActive: true, isPaused: false, startTime: now, lastResumeTime: now, accumulatedMs: 0, initialDurationMs: durMs,
+                    mode, subject, chapterId, studyType, planId: initialTask?.planId, taskId: initialTask?.id, isSmart: initialTask?.isSmart
+                });
+            };
+
+            const handlePauseResume = () => {
+                if (!activeTimer) return;
+                const now = Date.now();
+                if (activeTimer.isPaused) {
+                    setActiveTimerState({ ...activeTimer, isPaused: false, lastResumeTime: now });
+                } else {
+                    const currentMs = (activeTimer.accumulatedMs || 0) + (now - (activeTimer.lastResumeTime || now));
+                    setActiveTimerState({ ...activeTimer, isPaused: true, accumulatedMs: currentMs });
+                }
+            };
+
+            const handleStop = () => {
+                if (!activeTimer) return;
+                const now = Date.now();
+                const finalMs = activeTimer.isPaused ? (activeTimer.accumulatedMs||0) : ((activeTimer.accumulatedMs||0) + (now - (activeTimer.lastResumeTime||now)));
+                const durationMinutes = Math.round(finalMs / 60000);
+                
+                if (durationMinutes >= 1 || confirm("Session is under 1 minute. Save anyway?")) {
+                    addSession({
+                        date: getTodayString(), startTime: new Date(activeTimer.startTime).toISOString(), endTime: new Date().toISOString(),
+                        durationMinutes, subject: activeTimer.subject, chapterId: activeTimer.chapterId, type: activeTimer.studyType, mode: activeTimer.mode
+                    });
+                    
+                    if (activeTimer.taskId) {
+                        if (activeTimer.isSmart) {
+                            updateWeeklyPlanTask(activeTimer.planId, activeTimer.taskId, { completed: true, actualMinutes: durationMinutes });
+                        } else {
+                            updateTask(activeTimer.taskId, { completed: true, status: 'complete' });
+                        }
+                    }
+                }
+                setActiveTimerState(null);
+            };
+
+            const elapsedMs = getLiveElapsedMs(activeTimer);
+            let displayMs = elapsedMs;
+            if (activeTimer && activeTimer.mode !== 'Normal Timer' && activeTimer.initialDurationMs > 0) {
+                 displayMs = Math.max(0, activeTimer.initialDurationMs - elapsedMs);
+            }
+            const totalSecs = Math.floor(displayMs / 1000);
+            const h = Math.floor(totalSecs / 3600);
+            const m = Math.floor((totalSecs % 3600) / 60);
+            const s = totalSecs % 60;
+            const timeString = h > 0
+                ? `${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`
+                : `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+
+            return (
+                <div className="p-4 pt-6 h-full flex flex-col pb-24 bg-slate-50 dark:bg-darkBg overflow-y-auto">
+                    <h2 className="text-2xl font-bold mb-6 tracking-tight px-1">Study Timer</h2>
+
+                    {!activeTimer?.isActive ? (
+                        <Card className="p-5 animate-fade-in">
+                            <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl mb-5">
+                                {['Normal Timer', 'Pomodoro', 'Custom'].map(m => (
+                                    <button key={m} onClick={() => setMode(m)} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${mode === m ? 'bg-white dark:bg-darkCard shadow-sm text-sage-600' : 'text-slate-500'}`}>{m}</button>
+                                ))}
+                            </div>
+                            <div className="space-y-4">
+                                <Select label="Subject" value={subject} onChange={(e) => {setSubject(e.target.value); setChapterId('');}} options={SUBJECTS} />
+                                <Select label="Chapter (Optional)" value={chapterId} onChange={(e) => setChapterId(e.target.value)} options={[{label: 'General / Mixed', value: ''}, ...filteredChapters.map(c => ({label: c.name, value: c.id}))]} />
+                                <Select label="Study Type" value={studyType} onChange={(e) => setStudyType(e.target.value)} options={studyTypes} />
+                                {mode === 'Custom' && <div className="space-y-2">
+                                    <Input label="Custom Duration (Minutes) — up to 4 hours" type="number" value={customMins} onChange={(e) => { const v = Math.min(240, Math.max(1, parseInt(e.target.value) || 1)); setCustomMins(v); }} />
+                                    <div className="flex flex-wrap gap-2">
+                                        {[60, 90, 120, 180, 240].map(min => <button key={min} type="button" onClick={() => setCustomMins(min)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${Number(customMins) === min ? 'bg-sage-100 text-sage-700 border-sage-300' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>{min < 60 ? `${min}m` : `${min/60}h`}</button>)}
+                                    </div>
+                                </div>}
+                            </div>
+                            <Button onClick={handleStart} className="w-full mt-6 py-3 text-lg font-bold"><i className="ph-fill ph-play"></i> Start Study Session</Button>
+                        </Card>
+                    ) : (
+                        <div className="flex-1 flex flex-col justify-center items-center py-10 animate-fade-in">
+                            <Card className="w-full p-8 flex flex-col items-center border-2 border-sage-100 dark:border-darkBorder shadow-xl relative overflow-hidden">
+                                { activeTimer.mode !== 'Normal Timer' && activeTimer.initialDurationMs > 0 && <div className="absolute top-0 left-0 h-1.5 bg-sage-500 transition-all duration-1000" style={{ width: `${Math.min(100, (elapsedMs / activeTimer.initialDurationMs) * 100)}%` }}></div> }
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">{activeTimer.mode === 'Normal Timer' ? 'NORMAL TIMER' : activeTimer.mode}</p>
+                                <div className={`text-[80px] font-black tabular-nums tracking-tighter my-2 ${activeTimer.isPaused ? 'opacity-50' : 'text-slate-800 dark:text-white'}`}>{timeString}</div>
+                                <div className="text-center mb-8">
+                                    <p className="font-semibold text-lg">{activeTimer.subject}</p>
+                                    <p className="text-sm text-slate-500 mt-1 max-w-[250px] truncate mx-auto">{activeTimer.chapterId ? chapters.find(c=>c.id===activeTimer.chapterId)?.name : 'General Practice'} • {activeTimer.studyType}</p>
+                                </div>
+                                <div className="flex gap-4 w-full px-2">
+                                    <Button onClick={handlePauseResume} variant={activeTimer.isPaused ? "primary" : "outline"} className="flex-1 py-4 shadow-md text-xl"><i className={`ph-fill ${activeTimer.isPaused ? 'ph-play' : 'ph-pause'}`}></i></Button>
+                                    <Button onClick={handleStop} variant="danger" className="flex-1 py-4 shadow-md text-xl"><i className="ph-fill ph-stop"></i></Button>
+                                    <Button onClick={() => confirm("Reset to 00:00 without saving?") && setActiveTimerState(null)} variant="outline" className="px-5 py-4 shadow-md text-xl text-slate-500"><i className="ph-bold ph-arrow-counter-clockwise"></i></Button>
+                                </div>
+                            </Card>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- 4. SMART WEEKLY PLANNER VIEW ---
+        const SmartPlannerView = ({ onBack, onStartTask }) => {
+            const { weeklyPlans, addWeeklyPlan, updateWeeklyPlanTask, deleteWeeklyPlan, chapters } = useContext(AppContext);
+            const [showAdd, setShowAdd] = useState(false);
+            const [newPlan, setNewPlan] = useState({ subject: SUBJECTS[0], chapterId: '', targetName: 'Complete Chapter', lectures: 4, questions: true, dpp: true, revision: true, test: true, hoursPerDay: 5, startDate: getTodayString() });
+
+            const handleGenerate = (e) => {
+                e.preventDefault();
+                const startDate = new Date(newPlan.startDate);
+                let allTasks = [];
+                
+                for(let i=1; i<=newPlan.lectures; i++) {
+                    allTasks.push({ id: generateId(), name: `Lecture ${i}`, type: 'Lecture', estMinutes: 120, completed: false, actualMinutes: 0 });
+                    if(newPlan.dpp) allTasks.push({ id: generateId(), name: `DPP ${i}`, type: 'DPP', estMinutes: 45, completed: false, actualMinutes: 0 });
+                }
+                if(newPlan.questions) allTasks.push({ id: generateId(), name: `PYQs Practice`, type: 'PYQ', estMinutes: 90, completed: false, actualMinutes: 0 });
+                if(newPlan.revision) {
+                    allTasks.push({ id: generateId(), name: `Mid Revision`, type: 'Revision', estMinutes: 30, completed: false, actualMinutes: 0 });
+                    allTasks.push({ id: generateId(), name: `Full Revision`, type: 'Revision', estMinutes: 60, completed: false, actualMinutes: 0 });
+                    allTasks.push({ id: generateId(), name: `Mistake Review`, type: 'Mistake Review', estMinutes: 30, completed: false, actualMinutes: 0 });
+                }
+                if(newPlan.test) allTasks.push({ id: generateId(), name: `Chapter Test`, type: 'Test', estMinutes: 60, completed: false, actualMinutes: 0 });
+
+                let currentDayIndex = 0;
+                let currentDayMinutes = 0;
+                const maxMins = newPlan.hoursPerDay * 60;
+                
+                const assignedTasks = allTasks.map(task => {
+                     if (currentDayMinutes + task.estMinutes > maxMins && currentDayIndex < 6) { currentDayIndex++; currentDayMinutes = 0; }
+                     let taskDate = new Date(startDate); taskDate.setDate(taskDate.getDate() + currentDayIndex);
+                     currentDayMinutes += task.estMinutes;
+                     return { ...task, date: taskDate.toISOString().split('T')[0] };
+                });
+
+                addWeeklyPlan({ ...newPlan, id: generateId(), tasks: assignedTasks });
+                setShowAdd(false);
+            };
+
+            return (
+                <div className="p-4 pt-6 pb-24 animate-fade-in">
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
+                            <button onClick={onBack} className="w-8 h-8 rounded-full bg-white dark:bg-darkCard shadow-sm flex items-center justify-center"><i className="ph ph-arrow-left"></i></button>
+                            <h2 className="text-xl font-bold tracking-tight">Smart Weekly Planner</h2>
+                        </div>
+                        <button onClick={() => setShowAdd(!showAdd)} className="text-sage-600 font-bold text-sm">+ New Target</button>
+                    </div>
+
+                    {showAdd && (
+                        <Card className="p-4 mb-6 border border-sage-200">
+                            <h3 className="font-bold mb-4 text-sm text-sage-600">Create Auto-Distributed Target</h3>
+                            <form onSubmit={handleGenerate} className="space-y-4">
+                                <Select label="Subject" value={newPlan.subject} onChange={e => setNewPlan({...newPlan, subject: e.target.value, chapterId:''})} options={SUBJECTS} />
+                                <Select label="Chapter" value={newPlan.chapterId} onChange={e => setNewPlan({...newPlan, chapterId: e.target.value})} options={[{label: 'Select Chapter', value: ''}, ...chapters.filter(c=>c.subject===newPlan.subject).map(c=>({label:c.name, value:c.id}))]} required />
+                                <div className="grid grid-cols-2 gap-3">
+                                    <Input label="Lectures Count" type="number" value={newPlan.lectures} onChange={e => setNewPlan({...newPlan, lectures: parseInt(e.target.value)})} required />
+                                    <Input label="Available Hours/Day" type="number" value={newPlan.hoursPerDay} onChange={e => setNewPlan({...newPlan, hoursPerDay: parseInt(e.target.value)})} required />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 pt-2">
+                                     <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 text-xs font-medium"><input type="checkbox" checked={newPlan.dpp} onChange={e=>setNewPlan({...newPlan, dpp:e.target.checked})} className="custom-checkbox shrink-0"/> Incl. DPP</label>
+                                     <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 text-xs font-medium"><input type="checkbox" checked={newPlan.questions} onChange={e=>setNewPlan({...newPlan, questions:e.target.checked})} className="custom-checkbox shrink-0"/> Incl. PYQs</label>
+                                     <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 text-xs font-medium"><input type="checkbox" checked={newPlan.revision} onChange={e=>setNewPlan({...newPlan, revision:e.target.checked})} className="custom-checkbox shrink-0"/> Incl. Revision</label>
+                                     <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 text-xs font-medium"><input type="checkbox" checked={newPlan.test} onChange={e=>setNewPlan({...newPlan, test:e.target.checked})} className="custom-checkbox shrink-0"/> Incl. Test</label>
+                                </div>
+                                <Button type="submit" className="w-full mt-2">Generate Smart Plan</Button>
+                            </form>
+                        </Card>
+                    )}
+
+                    <div className="space-y-6">
+                        {weeklyPlans.map(plan => {
+                            const totalEst = plan.tasks.reduce((a,c)=>a+c.estMinutes,0);
+                            const totalComp = plan.tasks.filter(t=>t.completed).reduce((a,c)=>a+c.estMinutes,0);
+                            const prog = totalEst > 0 ? Math.round((totalComp/totalEst)*100) : 0;
+                            const todayStr = getTodayString();
+                            
+                            const elapsedDays = Math.max(1, (new Date(todayStr) - new Date(plan.startDate)) / (1000*60*60*24) + 1);
+                            const pace = totalComp / elapsedDays;
+                            let predictionStr = prog === 100 ? "Completed" : "Calculating...";
+                            if(prog < 100 && pace > 0) {
+                                const daysLeft = Math.ceil((totalEst - totalComp) / pace);
+                                let d = new Date(todayStr); d.setDate(d.getDate() + daysLeft);
+                                predictionStr = `Est. ${d.toLocaleDateString(undefined, {weekday:'short'})}`;
+                            } else if (prog < 100 && elapsedDays > 2 && pace === 0) predictionStr = "Behind Schedule";
+
+                            return (
+                                <Card key={plan.id} className="p-0 overflow-hidden border-l-4 border-l-sage-500">
+                                    <div className="p-4 border-b border-slate-100 dark:border-darkBorder relative bg-slate-50 dark:bg-slate-900/50">
+                                        <button onClick={() => deleteWeeklyPlan(plan.id)} className="absolute top-4 right-4 text-slate-400 hover:text-red-500"><i className="ph ph-trash"></i></button>
+                                        <p className="text-[10px] font-bold text-sage-600 uppercase mb-1">{plan.subject}</p>
+                                        <h3 className="font-bold text-lg leading-tight mb-3 pr-8">{chapters.find(c=>c.id===plan.chapterId)?.name || 'Custom Target'}</h3>
+                                        
+                                        <div className="flex justify-between text-xs font-semibold text-slate-500 mb-2">
+                                            <span>{prog}% Complete</span>
+                                            <span>{predictionStr}</span>
+                                        </div>
+                                        <ProgressBar progress={prog} heightClass="h-1.5" />
+                                    </div>
+                                    <div className="p-4 space-y-3">
+                                        {plan.tasks.map(t => {
+                                            const isCarryForward = !t.completed && t.date < todayStr;
+                                            return (
+                                            <div key={t.id} className={`flex items-center gap-3 p-2 rounded-lg ${isCarryForward ? 'bg-orange-50 dark:bg-orange-900/10' : ''}`}>
+                                                <input type="checkbox" checked={t.completed} onChange={(e) => updateWeeklyPlanTask(plan.id, t.id, {completed: e.target.checked})} className="custom-checkbox shrink-0" />
+                                                <div className="flex-1 min-w-0">
+                                                    <p className={`text-sm font-medium truncate ${t.completed ? 'line-through text-slate-400' : ''}`}>{t.name}</p>
+                                                    <p className="text-[10px] text-slate-500">{formatDate(t.date)} • {t.estMinutes} min {isCarryForward && <span className="text-orange-600 font-bold ml-1">CARRY FORWARD</span>}</p>
+                                                </div>
+                                                {!t.completed && (
+                                                    <button onClick={() => onStartTask({...t, isSmart: true, planId: plan.id, subject: plan.subject, chapterId: plan.chapterId})} className="w-8 h-8 rounded-full bg-sage-100 text-sage-600 flex items-center justify-center shrink-0">
+                                                        <i className="ph-fill ph-play"></i>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )})}
+                                    </div>
+                                </Card>
+                            )
+                        })}
+                        {weeklyPlans.length === 0 && !showAdd && <p className="text-center text-slate-400 text-sm mt-10">No active weekly plans.</p>}
+                    </div>
+                </div>
+            )
+        }
+
+        // --- STUDY CALENDAR + INSIGHTS (derived only from saved sessions) ---
+        const StudyCalendarView = ({onBack}) => { const {sessions}=useContext(AppContext); const today=getTodayString(); const [monthDate,setMonthDate]=useState(()=>parseLocalDate(today)||new Date()); const [selectedDate,setSelectedDate]=useState(today); const key=`${monthDate.getFullYear()}-${monthDate.getMonth()}`; const cells=useMemo(()=>{const first=new Date(monthDate.getFullYear(),monthDate.getMonth(),1),last=new Date(monthDate.getFullYear(),monthDate.getMonth()+1,0).getDate(),a=[];for(let i=0;i<first.getDay();i++)a.push(null);for(let d=1;d<=last;d++)a.push(toDateString(new Date(monthDate.getFullYear(),monthDate.getMonth(),d)));while(a.length%7)a.push(null);return a;},[key]); const monthMinutes=useMemo(()=>sessions.filter(s=>{const d=parseLocalDate(s.date);return d&&d.getFullYear()===monthDate.getFullYear()&&d.getMonth()===monthDate.getMonth();}).reduce((a,s)=>a+(Number(s.durationMinutes)||0),0),[sessions,key]); const selected=getSessionMinutes(sessions,selectedDate),sub=getSubjectMinutes(sessions,selectedDate); return <div className="p-4 pt-6 h-full pb-24 overflow-y-auto hide-scrollbar"><div className="flex justify-between mb-4"><button onClick={onBack} className="text-slate-500 font-bold"><i className="ph ph-arrow-left mr-2"></i>Back</button><span className="text-[10px] font-black tracking-widest text-sage-600">STUDY CONSISTENCY</span></div><div className="flex justify-between items-end mb-4"><div><h2 className="text-2xl font-bold">Study Calendar</h2><p className="text-[10px] text-slate-400 mt-1">Daily study hours from saved sessions</p></div><div className="text-right"><div className="text-xl font-black text-sage-600">{formatDuration(monthMinutes)}</div><div className="text-[9px] text-slate-400">this month</div></div></div><Card className="p-3 mb-4"><div className="flex justify-between items-center mb-3"><button onClick={()=>setMonthDate(d=>new Date(d.getFullYear(),d.getMonth()-1,1))} className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800"><i className="ph ph-caret-left"></i></button><h3 className="font-bold">{monthDate.toLocaleDateString(undefined,{month:'long',year:'numeric'})}</h3><button onClick={()=>setMonthDate(d=>new Date(d.getFullYear(),d.getMonth()+1,1))} className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800"><i className="ph ph-caret-right"></i></button></div><div className="grid grid-cols-7 gap-1 mb-1">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(x=><div key={x} className="text-center text-[8px] font-black text-slate-400 py-1">{x}</div>)}</div><div className="grid grid-cols-7 gap-1">{cells.map((date,i)=>date?<button key={date} onClick={()=>setSelectedDate(date)} className={`min-h-[54px] rounded-lg p-1 border ${date===selectedDate?'border-sage-500 bg-sage-50 dark:bg-sage-900/20':'border-transparent bg-slate-50 dark:bg-slate-900/40'} ${date===today?'ring-1 ring-sage-400':''}`}><div className="text-[10px] font-bold">{parseLocalDate(date).getDate()}</div><div className={`text-[9px] font-black mt-1 ${getSessionMinutes(sessions,date)>0?'text-sage-600':'text-slate-300 dark:text-slate-600'}`}>{getSessionMinutes(sessions,date)>0?formatDuration(getSessionMinutes(sessions,date)):'—'}</div></button>:<div key={`e${i}`} className="min-h-[54px]"></div>)}</div></Card><Card className="p-4"><div className="flex justify-between items-start mb-4"><div><p className="text-[10px] font-black uppercase tracking-wider text-slate-400">Selected Day</p><h3 className="font-bold text-lg">{getDateLabel(selectedDate,{weekday:'long',month:'short',day:'numeric',year:'numeric'})}</h3></div><div className="text-right"><div className="text-2xl font-black text-sage-600">{formatDuration(selected)}</div><div className="text-[9px] text-slate-400">total study</div></div></div>{SUBJECTS.map(x=><div key={x} className="mb-3"><div className="flex justify-between text-xs font-semibold mb-1"><span>{x}</span><span>{formatDuration(sub[x])}</span></div><ProgressBar progress={selected?(sub[x]/selected)*100:0} heightClass="h-1.5"/></div>)}{selected===0&&<p className="text-[10px] text-slate-400">No study session is recorded for this date yet.</p>}</Card></div>; };
+        const DailyWeeklyInsights = ({sessions}) => { const today=getTodayString(); const [date,setDate]=useState(today); const [start,setStart]=useState(()=>getWeekStart(today)); const days=Array.from({length:7},(_,i)=>addDays(start,i)); const daily=getSessionMinutes(sessions,date), ds=getSubjectMinutes(sessions,date), weekly=days.reduce((a,d)=>a+getSessionMinutes(sessions,d),0); const ws={}; SUBJECTS.forEach(x=>ws[x]=days.reduce((a,d)=>a+getSubjectMinutes(sessions,d)[x],0)); return <><Card className="p-4 mb-4"><div className="flex justify-between items-center mb-3"><div><h3 className="font-bold">Daily Insights</h3><p className="text-[10px] text-slate-400">Recorded study hours by subject</p></div><input type="date" value={date} onChange={e=>setDate(e.target.value)} className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-darkBorder rounded-lg px-2 py-2 text-[10px]"/></div><div className="text-3xl font-black text-sage-600 mb-3">{formatDuration(daily)}</div>{SUBJECTS.map(x=><div key={x} className="mb-2"><div className="flex justify-between text-xs font-semibold"><span>{x}</span><span>{formatDuration(ds[x])}</span></div><ProgressBar progress={daily?(ds[x]/daily)*100:0} heightClass="h-1.5"/></div>)}{daily===0&&<p className="text-[10px] text-slate-400">No saved study session for this date.</p>}</Card><Card className="p-4 mb-4"><div className="flex justify-between items-center mb-3"><div><h3 className="font-bold">Weekly Insights</h3><p className="text-[10px] text-slate-400">{getDateLabel(start,{month:'short',day:'numeric'})} – {getDateLabel(days[6],{month:'short',day:'numeric',year:'numeric'})}</p></div><div className="flex gap-1"><button onClick={()=>setStart(addDays(start,-7))} className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800"><i className="ph ph-caret-left"></i></button><button onClick={()=>setStart(addDays(start,7))} className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800"><i className="ph ph-caret-right"></i></button></div></div><div className="grid grid-cols-2 gap-3 mb-3"><div className="p-3 rounded-xl bg-sage-50 dark:bg-sage-900/20"><p className="text-[9px] uppercase font-black text-slate-400">Total</p><p className="text-xl font-black text-sage-600">{formatDuration(weekly)}</p></div><div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40"><p className="text-[9px] uppercase font-black text-slate-400">Study Days</p><p className="text-xl font-black">{days.filter(d=>getSessionMinutes(sessions,d)>0).length}/7</p></div></div>{days.map(d=><button key={d} onClick={()=>setDate(d)} className="w-full flex items-center gap-3 py-2 border-b border-slate-100 dark:border-darkBorder last:border-0 text-left"><span className="w-20 text-[10px] font-semibold text-slate-500">{getDateLabel(d,{weekday:'short',month:'short',day:'numeric'})}</span><div className="flex-1"><ProgressBar progress={weekly?(getSessionMinutes(sessions,d)/weekly)*100:0} heightClass="h-2"/></div><span className="w-14 text-right text-[10px] font-bold">{formatDuration(getSessionMinutes(sessions,d))}</span></button>)}<div className="mt-3 pt-3 border-t border-slate-100 dark:border-darkBorder">{SUBJECTS.map(x=><div key={x} className="flex justify-between text-xs py-1"><span>{x}</span><b>{formatDuration(ws[x])}</b></div>)}</div></Card></>; };
+
+        // --- 5. MORE VIEW (Analytics, Tests, Mistakes, Settings) ---
+        const MoreView = ({ onNavigateToTask }) => {
+            const { sessions, tests, mistakes, chapters, settings, updateSettings, addTest, deleteTest, addMistake, deleteMistake, exportData, importData, resetData } = useContext(AppContext);
+            const [view, setView] = useState('menu');
+            const [showTestForm, setShowTestForm] = useState(false);
+            const [showMistakeForm, setShowMistakeForm] = useState(false);
+            const [testForm, setTestForm] = useState({ name:'', date:getTodayString(), subject:'All Subjects', marks:'', total:'', mistakes:'', notes:'' });
+            const [mistakeForm, setMistakeForm] = useState({ subject:'Physics', chapter:'', question:'', concept:'', solution:'', image:'' });
+
+            const syllabusStats = useMemo(() => {
+                const bySubject = {};
+                SUBJECTS.forEach(subject => {
+                    const list = chapters.filter(c=>c.subject===subject);
+                    bySubject[subject] = { total:list.length, completed:list.filter(c=>calculateProgress(c.progress)===100).length, avg:list.length ? Math.round(list.reduce((a,c)=>a+calculateProgress(c.progress),0)/list.length) : 0 };
+                });
+                const total=chapters.length;
+                return { total, completed:chapters.filter(c=>calculateProgress(c.progress)===100).length, avg:total?Math.round(chapters.reduce((a,c)=>a+calculateProgress(c.progress),0)/total):0, bySubject };
+            },[chapters]);
+
+            const totalStudyMinutes=sessions.reduce((a,s)=>a+(Number(s.durationMinutes)||0),0);
+            const sortedTests=[...tests].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+            const testAverage=tests.length?Math.round(tests.reduce((a,t)=>a+(Number(t.percentage)||0),0)/tests.length):0;
+            const bestTest=tests.length?Math.max(...tests.map(t=>Number(t.percentage)||0)):0;
+
+            const submitTest=e=>{
+                e.preventDefault();
+                const marks=Number(testForm.marks)||0,total=Number(testForm.total)||0;
+                if(!testForm.name.trim()||total<=0||marks<0||marks>total)return;
+                addTest({...testForm,name:testForm.name.trim(),marks,total,percentage:Math.round((marks/total)*1000)/10,mistakes:Number(testForm.mistakes)||0});
+                setTestForm({name:'',date:getTodayString(),subject:'All Subjects',marks:'',total:'',mistakes:'',notes:''}); setShowTestForm(false);
+            };
+            const submitMistake=e=>{
+                e.preventDefault(); if(!mistakeForm.question.trim()&&!mistakeForm.concept.trim())return;
+                addMistake({...mistakeForm,question:mistakeForm.question.trim(),concept:mistakeForm.concept.trim(),solution:mistakeForm.solution.trim()});
+                setMistakeForm({subject:'Physics',chapter:'',question:'',concept:'',solution:'',image:''}); setShowMistakeForm(false);
+            };
+            const handleImage=file=>{
+                if(!file)return; if(!file.type.startsWith('image/'))return alert('Please attach an image file.'); if(file.size>3*1024*1024)return alert('Image should be 3 MB or smaller.');
+                const r=new FileReader(); r.onload=e=>setMistakeForm(prev=>({...prev,image:e.target.result})); r.readAsDataURL(file);
+            };
+
+            if(view==='planner')return <SmartPlannerView onBack={()=>setView('menu')} onStartTask={onNavigateToTask}/>;
+            if(view==='calendar')return <StudyCalendarView onBack={()=>setView('menu')}/>;
+            if(view==='analytics')return <div className="p-4 pt-6 h-full pb-24 overflow-y-auto">
+                <button onClick={()=>setView('menu')} className="mb-4 text-slate-500 font-bold"><i className="ph ph-arrow-left mr-2"></i>Back</button>
+                <div className="flex justify-between items-start mb-4"><div><p className="text-[10px] font-black tracking-widest text-sage-600">NEET TRACKER PRO</p><h2 className="text-xl font-bold">Analytics</h2></div><div className="text-right"><div className="text-2xl font-black text-sage-600">{formatDuration(totalStudyMinutes)}</div><div className="text-[9px] text-slate-400">total study</div></div></div>
+                <Card className="p-4 mb-4"><div className="flex justify-between items-center mb-3"><div><h3 className="font-bold">Syllabus Completion</h3><p className="text-[10px] text-slate-400">{syllabusStats.completed}/{syllabusStats.total} chapters fully complete</p></div><span className="text-2xl font-black text-sage-600">{syllabusStats.avg}%</span></div><ProgressBar progress={syllabusStats.avg} heightClass="h-3"/><div className="grid grid-cols-2 gap-3 mt-4">{SUBJECTS.map(sub=>{const x=syllabusStats.bySubject[sub];return <div key={sub} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/50"><div className="flex justify-between text-xs font-bold mb-1"><span>{sub}</span><span>{x.avg}%</span></div><ProgressBar progress={x.avg} heightClass="h-1.5"/><p className="text-[9px] text-slate-400 mt-1">{x.completed}/{x.total} chapters complete</p></div>})}</div></Card>
+                <Card className="p-4 mb-4"><h3 className="font-bold mb-3">Study Hours by Subject</h3>{SUBJECTS.map(sub=>{const mins=sessions.filter(x=>x.subject===sub).reduce((a,x)=>a+(Number(x.durationMinutes)||0),0);return <div key={sub} className="mb-3"><div className="flex justify-between text-xs font-semibold mb-1"><span>{sub}</span><span>{formatDuration(mins)}</span></div><ProgressBar progress={totalStudyMinutes?(mins/totalStudyMinutes)*100:0} heightClass="h-2"/></div>})}</Card>
+                 <DailyWeeklyInsights sessions={sessions} />
+                <Card className="p-4"><h3 className="font-bold mb-3">Test Performance</h3><div className="grid grid-cols-3 gap-2 text-center"><div><b className="text-xl">{tests.length}</b><p className="text-[9px] text-slate-400">Tests</p></div><div><b className="text-xl">{testAverage}%</b><p className="text-[9px] text-slate-400">Average</p></div><div><b className="text-xl">{bestTest}%</b><p className="text-[9px] text-slate-400">Best</p></div></div></Card>
+            </div>;
+
+            if(view==='tests')return <div className="p-4 pt-6 h-full pb-24 overflow-y-auto">
+                <div className="flex items-center justify-between mb-4"><button onClick={()=>setView('menu')} className="text-slate-500 font-bold"><i className="ph ph-arrow-left mr-2"></i>Back</button><Button onClick={()=>setShowTestForm(v=>!v)} className="text-xs py-2"><i className="ph ph-plus"></i>Add Test</Button></div><h2 className="text-xl font-bold mb-4">Test Tracker</h2>
+                {showTestForm&&<Card className="p-4 mb-4"><form onSubmit={submitTest} className="space-y-3"><Input label="Test Name" value={testForm.name} onChange={e=>setTestForm({...testForm,name:e.target.value})} required/><div className="grid grid-cols-2 gap-3"><Input label="Date" type="date" value={testForm.date} onChange={e=>setTestForm({...testForm,date:e.target.value})}/><Select label="Subject" value={testForm.subject} onChange={e=>setTestForm({...testForm,subject:e.target.value})} options={['All Subjects',...SUBJECTS]}/></div><div className="grid grid-cols-3 gap-2"><Input label="Marks" type="number" value={testForm.marks} onChange={e=>setTestForm({...testForm,marks:e.target.value})}/><Input label="Total" type="number" value={testForm.total} onChange={e=>setTestForm({...testForm,total:e.target.value})}/><Input label="Mistakes" type="number" value={testForm.mistakes} onChange={e=>setTestForm({...testForm,mistakes:e.target.value})}/></div><Input label="Notes" value={testForm.notes} onChange={e=>setTestForm({...testForm,notes:e.target.value})}/><Button type="submit" className="w-full">Save Test</Button></form></Card>}
+                <div className="grid grid-cols-3 gap-2 mb-4"><Card className="p-3 text-center"><b className="text-lg">{tests.length}</b><p className="text-[9px] text-slate-400">Tests</p></Card><Card className="p-3 text-center"><b className="text-lg">{testAverage}%</b><p className="text-[9px] text-slate-400">Average</p></Card><Card className="p-3 text-center"><b className="text-lg">{bestTest}%</b><p className="text-[9px] text-slate-400">Best</p></Card></div>
+                {sortedTests.length===0?<Card className="p-6 text-center text-slate-400">No tests added yet.</Card>:<div className="space-y-3">{sortedTests.map((t,i)=><Card key={t.id} className="p-4"><div className="flex justify-between"><div><h3 className="font-bold">{t.name}</h3><p className="text-[10px] text-slate-400">{formatDate(t.date)} • {t.subject}</p></div><button onClick={()=>confirm('Delete this test?')&&deleteTest(t.id)} className="text-slate-400 hover:text-red-500"><i className="ph ph-trash"></i></button></div><div className="flex justify-between items-end mt-3"><div><span className="text-3xl font-black text-sage-600">{t.percentage}%</span><span className="text-xs text-slate-400 ml-2">{t.marks}/{t.total}</span></div><span className="text-xs text-slate-500">Mistakes: <b>{t.mistakes||0}</b></span></div>{t.notes&&<p className="text-xs text-slate-500 mt-2">{t.notes}</p>}{i<sortedTests.length-1&&<p className="text-[9px] text-slate-400 mt-2">vs previous: {(Number(t.percentage)-Number(sortedTests[i+1].percentage)).toFixed(1)}%</p>}</Card>)}</div>}
+            </div>;
+
+            if(view==='mistakes')return <div className="p-4 pt-6 h-full pb-24 overflow-y-auto">
+                <div className="flex items-center justify-between mb-4"><button onClick={()=>setView('menu')} className="text-slate-500 font-bold"><i className="ph ph-arrow-left mr-2"></i>Back</button><Button onClick={()=>setShowMistakeForm(v=>!v)} className="text-xs py-2"><i className="ph ph-plus"></i>Add Mistake</Button></div><h2 className="text-xl font-bold mb-4">Mistake Log</h2>
+                {showMistakeForm&&<Card className="p-4 mb-4"><form onSubmit={submitMistake} className="space-y-3"><Select label="Subject" value={mistakeForm.subject} onChange={e=>setMistakeForm({...mistakeForm,subject:e.target.value})} options={SUBJECTS}/><Input label="Chapter" value={mistakeForm.chapter} onChange={e=>setMistakeForm({...mistakeForm,chapter:e.target.value})} placeholder="Chapter name"/><Input label="Question / Error" value={mistakeForm.question} onChange={e=>setMistakeForm({...mistakeForm,question:e.target.value})} placeholder="What went wrong?"/><Input label="Concept / Reason" value={mistakeForm.concept} onChange={e=>setMistakeForm({...mistakeForm,concept:e.target.value})} placeholder="Why?"/><Input label="Correct Approach" value={mistakeForm.solution} onChange={e=>setMistakeForm({...mistakeForm,solution:e.target.value})} placeholder="Formula / approach"/><div><label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Attach Image</label><input type="file" accept="image/*" className="mt-1 block w-full text-xs" onChange={e=>handleImage(e.target.files?.[0])}/>{mistakeForm.image&&<img src={mistakeForm.image} className="mt-2 max-h-48 w-full object-contain rounded-xl border"/>}</div><Button type="submit" className="w-full">Save Mistake</Button></form></Card>}
+                {mistakes.length===0?<Card className="p-6 text-center text-slate-400">No mistakes logged yet.</Card>:<div className="space-y-3">{[...mistakes].reverse().map(m=><Card key={m.id} className="p-4"><div className="flex justify-between"><div><p className="text-[10px] font-black uppercase text-red-500">{m.subject}</p><h3 className="font-bold">{m.chapter||'General'}</h3></div><button onClick={()=>confirm('Delete this mistake?')&&deleteMistake(m.id)} className="text-slate-400"><i className="ph ph-trash"></i></button></div>{m.question&&<p className="text-sm mt-2"><b>Question:</b> {m.question}</p>}{m.concept&&<p className="text-xs text-slate-500 mt-1"><b>Reason:</b> {m.concept}</p>}{m.solution&&<p className="text-xs text-sage-700 mt-1"><b>Correct:</b> {m.solution}</p>}{m.image&&<img src={m.image} className="mt-3 max-h-64 w-full object-contain rounded-xl border"/>}</Card>)}</div>}
+            </div>;
+
+            return <div className="p-4 pt-8 h-full overflow-y-auto pb-24 flex flex-col"><div className="mb-6 px-1"><p className="text-[10px] font-black tracking-widest text-sage-600">NEET TRACKER PRO</p><h2 className="text-2xl font-bold tracking-tight">More Options</h2></div>
+                <div className="mb-3"><Card onClick={()=>setView('calendar')} className="flex items-center gap-4 p-4 cursor-pointer"><div className="w-10 h-10 rounded-full bg-sage-100 text-sage-600 flex items-center justify-center text-xl"><i className="ph-fill ph-calendar"></i></div><div className="flex-1"><h3 className="font-bold text-sm">Study Calendar</h3><p className="text-[10px] text-slate-500">Daily hours & consistency</p></div><i className="ph ph-caret-right text-slate-300"></i></Card></div>
+                <div className="grid gap-3 mb-8"><Card onClick={()=>setView('planner')} className="flex items-center gap-4 p-4 cursor-pointer"><div className="w-10 h-10 rounded-full bg-sage-100 text-sage-600 flex items-center justify-center text-xl"><i className="ph-fill ph-calendar-check"></i></div><div className="flex-1"><h3 className="font-bold text-sm">Weekly Target</h3><p className="text-[10px] text-slate-500">Plan & track weekly targets</p></div><i className="ph ph-caret-right text-slate-300"></i></Card><Card onClick={()=>setView('analytics')} className="flex items-center gap-4 p-4 cursor-pointer"><div className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-xl"><i className="ph-fill ph-chart-line-up"></i></div><div className="flex-1"><h3 className="font-bold text-sm">Analytics</h3><p className="text-[10px] text-slate-500">Study + syllabus completion</p></div><i className="ph ph-caret-right text-slate-300"></i></Card><Card onClick={()=>setView('tests')} className="flex items-center gap-4 p-4 cursor-pointer"><div className="w-10 h-10 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center text-xl"><i className="ph-fill ph-exam"></i></div><div className="flex-1"><h3 className="font-bold text-sm">Test Tracker</h3><p className="text-[10px] text-slate-500">Marks, %, mistakes & comparison</p></div><i className="ph ph-caret-right text-slate-300"></i></Card><Card onClick={()=>setView('mistakes')} className="flex items-center gap-4 p-4 cursor-pointer"><div className="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center text-xl"><i className="ph-fill ph-warning-circle"></i></div><div className="flex-1"><h3 className="font-bold text-sm">Mistake Log</h3><p className="text-[10px] text-slate-500">Save mistakes + attach images</p></div><i className="ph ph-caret-right text-slate-300"></i></Card></div>
+                <h3 className="font-bold text-xs uppercase tracking-wider text-slate-400 px-1 mb-2">Settings & Data</h3><Card className="space-y-4"><div className="flex justify-between items-center py-1"><span className="text-sm font-semibold">Dark Mode</span><button onClick={()=>updateSettings({theme:settings.theme==='dark'?'light':'dark'})} className={`w-12 h-6 rounded-full relative ${settings.theme==='dark'?'bg-sage-500':'bg-slate-300'}`}><div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 ${settings.theme==='dark'?'translate-x-6':'translate-x-0.5'}`}></div></button></div><div className="pt-3 border-t border-slate-100 dark:border-darkBorder grid grid-cols-2 gap-2"><Button variant="outline" onClick={exportData} className="text-xs py-2 w-full"><i className="ph ph-download"></i> Backup Data</Button><div><input type="file" id="importFile" accept=".json" className="hidden" onChange={e=>{const file=e.target.files[0];if(file){const r=new FileReader();r.onload=ev=>importData(ev.target.result);r.readAsText(file);}e.target.value=null;}}/><Button variant="outline" onClick={()=>document.getElementById('importFile').click()} className="text-xs py-2 w-full"><i className="ph ph-upload"></i> Restore Data</Button></div></div><Button variant="ghost" onClick={resetData} className="w-full text-red-500 text-xs py-2">Reset App Data</Button></Card><div className="mt-10 text-center pb-4 opacity-50"><p className="text-[10px] font-bold tracking-widest uppercase">NEET TRACKER PRO • CREATED BY SF</p></div>
+            </div>;
+        }
+
+        // --- MAIN APP COMPONENT ---
+        const App = () => {
+            const [currentView, setCurrentView] = useState('home');
+            const [timerPayload, setTimerPayload] = useState(null);
+
+            const handleNavigateToTask = (task) => {
+                setTimerPayload(task);
+                setCurrentView('study');
+            };
+
+            const navItems = [
+                { id: 'home', icon: 'ph-house', label: 'Home' },
+                { id: 'planner', icon: 'ph-book-open', label: 'Syllabus' },
+                { id: 'study', icon: 'ph-timer', label: 'Study' },
+                { id: 'more', icon: 'ph-dots-three', label: 'More' }
+            ];
+
+            return (
+                <div className="relative w-full max-w-md mx-auto bg-cream dark:bg-darkBg h-screen shadow-2xl overflow-hidden flex flex-col">
+                    <main className="flex-1 overflow-hidden relative z-0">
+                        {currentView === 'home' && <DashboardView onNavigate={setCurrentView} onNavigateToTask={handleNavigateToTask} />}
+                        {currentView === 'planner' && <PlannerView />}
+                        {currentView === 'study' && <StudyView initialTask={timerPayload} />}
+                        {currentView === 'more' && <MoreView onNavigateToTask={handleNavigateToTask} />}
+                    </main>
+
+                    <GlobalTimerBar onNavigate={setCurrentView} />
+
+                    <nav className="fixed bottom-0 left-0 right-0 w-full max-w-md mx-auto bg-white/90 dark:bg-darkCard/90 backdrop-blur-lg border-t border-slate-200/50 dark:border-darkBorder z-50 pb-safe">
+                        <div className="flex justify-around items-center px-2 py-2">
+                            {navItems.map(item => {
+                                const isActive = currentView === item.id;
+                                return (
+                                    <button key={item.id} onClick={() => { setCurrentView(item.id); if(item.id !== 'study') setTimerPayload(null); }} className={`flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all duration-200 ${isActive ? 'text-sage-600 dark:text-sage-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}>
+                                        <i className={`${isActive ? 'ph-fill' : 'ph'} ${item.icon} text-2xl transition-transform ${isActive ? '-translate-y-0.5' : ''}`}></i>
+                                        <span className={`text-[9px] font-bold mt-0.5 tracking-wide ${isActive ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>{item.label}</span>
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    </nav>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<AppProvider><App /></AppProvider>);
+    </script>
+</body>
+</html>
